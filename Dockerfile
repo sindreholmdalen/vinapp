@@ -49,7 +49,7 @@ COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 WORKDIR /var/www/html
 
 # Copy composer files and install dependencies (cached layer)
-COPY composer.json composer.lock ./
+COPY composer.json ./
 RUN composer install \
     --no-dev \
     --no-interaction \
