@@ -1,0 +1,55 @@
+version: '3.8'
+
+# Lokal utvikling med Docker Compose
+# Start med: docker-compose up
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:80"
+    environment:
+      APP_NAME: VinApp
+      APP_ENV: local
+      APP_DEBUG: "true"
+      APP_URL: http://localhost:8080
+      APP_KEY: base64:placeholder-replace-with-real-key
+      DB_CONNECTION: mysql
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_DATABASE: vinapp
+      DB_USERNAME: vinapp
+      DB_PASSWORD: secret
+      CACHE_DRIVER: database
+      QUEUE_CONNECTION: database
+      SESSION_DRIVER: database
+      VINMONOPOLET_API_URL: https://apis.vinmonopolet.no
+      VINMONOPOLET_API_KEY: ${VINMONOPOLET_API_KEY:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - app-storage:/var/www/html/storage/app
+
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: vinapp
+      MYSQL_USER: vinapp
+      MYSQL_PASSWORD: secret
+      MYSQL_ROOT_PASSWORD: rootsecret
+    ports:
+      - "3306:3306"
+    volumes:
+      - db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  db-data:
+  app-storage:

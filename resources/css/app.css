@@ -1,0 +1,67 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+    :root {
+        --wine-primary: #7a1b3d;
+        --wine-secondary: #ab1d4a;
+        --wine-accent: #e04870;
+    }
+}
+
+@layer components {
+    .btn-wine {
+        @apply bg-wine-800 hover:bg-wine-700 text-white font-medium py-2 px-4 rounded-lg transition-colors duration-200;
+    }
+
+    .btn-wine-outline {
+        @apply border-2 border-wine-800 text-wine-800 hover:bg-wine-800 hover:text-white font-medium py-2 px-4 rounded-lg transition-colors duration-200;
+    }
+
+    .card {
+        @apply bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6;
+    }
+
+    .stat-card {
+        @apply card flex flex-col items-center justify-center text-center;
+    }
+
+    .input-field {
+        @apply w-full rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white shadow-sm focus:border-wine-500 focus:ring-wine-500;
+    }
+
+    /* Scanner overlay */
+    .scanner-overlay {
+        @apply absolute inset-0 flex items-center justify-center;
+    }
+
+    .scanner-frame {
+        @apply w-64 h-64 border-2 border-white rounded-lg relative;
+        box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5);
+    }
+
+    .scanner-frame::before,
+    .scanner-frame::after {
+        content: '';
+        @apply absolute w-8 h-8;
+    }
+
+    .scanner-frame::before {
+        @apply top-0 left-0 border-t-4 border-l-4 border-wine-400 rounded-tl-lg;
+    }
+
+    .scanner-frame::after {
+        @apply bottom-0 right-0 border-b-4 border-r-4 border-wine-400 rounded-br-lg;
+    }
+
+    .scanner-line {
+        @apply absolute left-2 right-2 h-0.5 bg-wine-500;
+        animation: scan 2s linear infinite;
+    }
+
+    @keyframes scan {
+        0%, 100% { top: 10%; }
+        50% { top: 90%; }
+    }
+}
