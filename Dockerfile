@@ -1,4 +1,4 @@
-# VinApp — Multi-stage Dockerfile
+# VinApp â Multi-stage Dockerfile
 # Stage 1: Build frontend assets
 FROM node:20-alpine AS frontend
 
@@ -8,7 +8,7 @@ COPY package.json ./
 RUN npm install --legacy-peer-deps
 
 COPY resources/ ./resources/
-COPY vite.config.js tailwind.config.js postcss.config.js ./
+COPY vite.config.js tailwind.config.js tailwind.config.cjs postcss.config.js ./
 COPY public/ ./public/
 
 RUN npm run build
