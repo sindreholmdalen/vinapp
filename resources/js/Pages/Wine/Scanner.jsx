@@ -23,6 +23,12 @@ function BarcodeScanner({ onDetected, active }) {
 
     const startCamera = async () => {
         try {
+            // Kamera-API krever HTTPS
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                toast.error('Kamera krever HTTPS. Bruk manuell inntasting av strekkoden i stedet.', { duration: 8000 });
+                return;
+            }
+
             const { BrowserMultiFormatReader } = await import('@zxing/browser');
             const reader = new BrowserMultiFormatReader();
             readerRef.current = reader;
@@ -30,7 +36,7 @@ function BarcodeScanner({ onDetected, active }) {
             const videoElement = videoRef.current;
             if (!videoElement) return;
 
-            // Bruk bakre kamera på mobil
+            // Bruk decodeFromConstraints â lar zxing hÃ¥ndtere kamera-stream korrekt
             const constraints = {
                 video: {
                     facingMode: { ideal: 'environment' },
@@ -39,23 +45,23 @@ function BarcodeScanner({ onDetected, active }) {
                 }
             };
 
-            const stream = await navigator.mediaDevices.getUserMedia(constraints);
-            streamRef.current = stream;
-            videoElement.srcObject = stream;
-
-            // Start kontinuerlig scanning
-            reader.decodeFromVideoElement(videoElement, (result, error) => {
+            await reader.decodeFromConstraints(constraints, videoElement, (result, error) => {
                 if (result) {
-                    const barcode = result.getText();
-                    onDetected(barcode);
+                    onDetected(result.getText());
                 }
             });
+
+            if (videoElement.srcObject) {
+                streamRef.current = videoElement.srcObject;
+            }
         } catch (err) {
             console.error('Camera error:', err);
             if (err.name === 'NotAllowedError') {
                 toast.error('Kameratilgang ble nektet. Gi tillatelse i nettleserinnstillingene.');
             } else if (err.name === 'NotFoundError') {
                 toast.error('Fant ikke kamera. Sjekk at enheten har et kamera.');
+            } else if (!navigator.mediaDevices) {
+                toast.error('Kamera krever HTTPS. Bruk manuell inntasting i stedet.', { duration: 8000 });
             } else {
                 toast.error('Kunne ikke starte kameraet: ' + err.message);
             }
@@ -126,7 +132,7 @@ function ManualInput({ onSubmit }) {
                 inputMode="numeric"
                 pattern="[0-9]*"
             />
-            <button type="submit" className="btn-wine px-4">Søk</button>
+            <button type="submit" className="btn-wine px-4">SÃ¸k</button>
         </form>
     );
 }
@@ -163,7 +169,7 @@ function ProductResult({ product, onAdd, onDismiss }) {
                             <p className="text-sm text-gray-500">{product.producer}</p>
                         </div>
                         <button onClick={onDismiss} className="text-gray-400 hover:text-gray-600 p-1">
-                            <svg className="h5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                             </svg>
                         </button>
@@ -176,7 +182,7 @@ function ProductResult({ product, onAdd, onDismiss }) {
                         {product.grape_variety && <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{product.grape_variety}</span>}
                     </div>
 
-                    <p className="text-2xl font-bold text-wine-700">
+                    <p className="text-2xl font-bold text-wine-700 mt-3">
                         {product.price ? `${Number(product.price).toLocaleString('nb-NO')} kr` : 'Ukjent pris'}
                     </p>
 
@@ -211,13 +217,13 @@ export default function WineScanner() {
     const [lastBarcode, setLastBarcode] = useState('');
 
     const handleBarcodeDetected = useCallback(async (barcode) => {
-        // Unngå å søke opp samme strekkode flere ganger
+        // UnngÃ¥ Ã¥ sÃ¸ke opp samme strekkode flere ganger
         if (barcode === lastBarcode || lookingUp) return;
         setLastBarcode(barcode);
         setScanning(false);
         setLookingUp(true);
 
-        toast.loading('Søker opp strekkode...', { id: 'barcode-lookup' });
+        toast.loading('SÃ¸ker opp strekkode...', { id: 'barcode-lookup' });
 
         try {
             const response = await lookupBarcode(barcode);
@@ -225,9 +231,9 @@ export default function WineScanner() {
             toast.success('Vin funnet!', { id: 'barcode-lookup' });
         } catch (err) {
             if (err.response?.status === 404) {
-                toast.error('Fant ingen vin med denne strekkoden. Prøv manuelt søk.', { id: 'barcode-lookup' });
+                toast.error('Fant ingen vin med denne strekkoden. PrÃ¸v manuelt sÃ¸k.', { id: 'barcode-lookup' });
             } else {
-                toast.error('Oppslag feilet. Prøv igjen.', { id: 'barcode-lookup' });
+                toast.error('Oppslag feilet. PrÃ¸v igjen.', { id: 'barcode-lookup' });
             }
         } finally {
             setLookingUp(false);
@@ -256,7 +262,7 @@ export default function WineScanner() {
 
             <div className="mb-6">
                 <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Scan strekkode</h1>
-                <p className="text-gray-500 mt-1">Scan vinflasken med kameraet for å legge den i kjelleren</p>
+                <p className="text-gray-500 mt-1">Scan vinflasken med kameraet for Ã¥ legge den i kjelleren</p>
             </div>
 
             <div className="max-w-lg mx-auto space-y-6">
@@ -284,7 +290,7 @@ export default function WineScanner() {
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0z" />
                                 </svg>
                                 <span className="text-lg font-medium">Start kamera</span>
-                                <span className="text-sm text-gray-400">Pek kameraet mot strekkoden på flasken</span>
+                                <span className="text-sm text-gray-400">Pek kameraet mot strekkoden pÃ¥ flasken</span>
                             </button>
                         )}
 
@@ -301,7 +307,7 @@ export default function WineScanner() {
 
                         <div className="text-center">
                             <Link href="/search" className="text-sm text-wine-600 hover:text-wine-800">
-                                Søk etter vin manuelt i stedet
+                                SÃ¸k etter vin manuelt i stedet
                             </Link>
                         </div>
                     </>
@@ -311,7 +317,7 @@ export default function WineScanner() {
                 {lookingUp && !product && (
                     <div className="flex flex-col items-center py-8">
                         <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-wine-700" />
-                        <p className="text-gray-500 mt-4">Søker i Vinmonopolets database...</p>
+                        <p className="text-gray-500 mt-4">SÃ¸ker i Vinmonopolets database...</p>
                     </div>
                 )}
 
