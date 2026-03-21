@@ -30,7 +30,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/cellar', [CellarController::class, 'index']);
     Route::post('/cellar', [CellarController::class, 'store']);
     Route::get('/cellar/{cellarItem}', [CellarController::class, 'show']);
-    Route::put('/cellar/{cellarItem}', [CellarController::class, 'update'])+
+    Route::put('/cellar/{cellarItem}', [CellarController::class, 'update']);
     Route::delete('/cellar/{cellarItem}', [CellarController::class, 'destroy']);
     Route::post('/cellar/{cellarItem}/remove', [CellarController::class, 'removeBottle']);
 
