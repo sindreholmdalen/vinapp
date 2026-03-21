@@ -1,5 +1,3 @@
-let isRedirectingToLogin = false;
-
 import axios from 'axios';
 
 const api = axios.create({
@@ -13,12 +11,18 @@ const api = axios.create({
 });
 
 // Response interceptor for error handling
+// Guard mot redirect-lÃ¸kke: omdiriger kun Ã©n gang og kun hvis vi ikke allerede er pÃ¥ login-siden
+let isRedirectingToLogin = false;
 api.interceptors.response.use(
     (response) => response,
     (error) => {
-                    if (error.response?.status === 401 && !isRedirectingToLogin && !window.location.pathname.startsWith('/login')) {}
-                            isRedirectingToLogin = true;
-                            window.location.href = '/login';
+        if (
+            error.response?.status === 401 &&
+            !isRedirectingToLogin &&
+            !window.location.pathname.startsWith('/login')
+        ) {
+            isRedirectingToLogin = true;
+            window.location.href = '/login';
         }
         return Promise.reject(error);
     }
