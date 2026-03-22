@@ -9,23 +9,17 @@ if [ -z "$APP_KEY" ]; then
     php artisan key:generate --force
 fi
 
-# Wait for DB and run migrations
-echo "🔄 Waiting for database and running migrations..."
-RETRIES=20
-until php artisan migrate --force; do
-    RETRIES=$((RETRIES - 1))
-    if [ $RETRIES -le 0 ]; then
-        echo "❌ Database not available after retries. Exiting."
-        exit 1
-    fi
-    echo "⏳ DB not ready yet, retrying in 5s... ($RETRIES retries left)"
-    sleep 5
-done
+# Run migrations
+echo "🔄 Running migrations..."
+php artisan migrate --force
 
-# Clear and cache config
+# Clear stale caches first, then rebuild from current env vars
 echo "🔧 Caching configuration..."
+php artisan config:clear
 php artisan config:cache
+php artisan route:clear
 php artisan route:cache
+php artisan view:clear
 php artisan view:cache
 
 # Create storage link
