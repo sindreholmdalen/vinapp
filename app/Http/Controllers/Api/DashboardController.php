@@ -24,7 +24,7 @@ class DashboardController extends Controller
         // Totalt antall unike viner
         $uniqueWines = CellarItem::forUser($userId)->inStock()->distinct('wine_id')->count('wine_id');
 
-        // Total verdi (basert på nåvårende Vinmonopolet-pris)
+        // Total verdi (basert på nåværende Vinmonopolet-pris)
         $currentValue = CellarItem::forUser($userId)
             ->inStock()
             ->join('wines', 'cellar_items.wine_id', '=', 'wines.id')
@@ -34,7 +34,7 @@ class DashboardController extends Controller
         // Total innkjøpsverdi
         $purchaseValue = CellarItem::forUser($userId)
             ->inStock()
-            ->selectRaw('SUM quantity * COALESCE(purchase_price, 0)) as total')
+            ->selectRaw('SUM(quantity * COALESCE(purchase_price, 0)) as total')
             ->value('total') ?? 0;
 
         // Fordeling per vintype
@@ -63,11 +63,11 @@ class DashboardController extends Controller
             ->limit(10)
             ->get();
 
-        // Mánedsstatistikk (siste 12 måneder)
+        // Månedsstatistikk (siste 12 måneder) - DATE_FORMAT for MySQL compatibility
         $monthlyStats = CellarTransaction::forUser($userId)
             ->where('created_at', '>=', now()->subMonths(12))
             ->groupBy(DB::raw("DATE_FORMAT(created_at, '%Y-%m')"), 'type')
-            ->selectRaw("DATE_FORMAT(created_at, '%Y-%m') as month, type, SUM quantity) as count, SUM quantity * COALESCE(price_per_unit, 0)) as value")
+            ->selectRaw("DATE_FORMAT(created_at, '%Y-%m') as month, type, SUM(quantity) as count, SUM(quantity * COALESCE(price_per_unit, 0)) as value")
             ->orderBy('month')
             ->get()
             ->groupBy('month');
