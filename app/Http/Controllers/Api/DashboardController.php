@@ -66,8 +66,8 @@ class DashboardController extends Controller
         // Mánedsstatistikk (siste 12 måneder)
         $monthlyStats = CellarTransaction::forUser($userId)
             ->where('created_at', '>=', now()->subMonths(12))
-            ->groupBy(DB::raw("strftime('%Y-%m', created_at)"), 'type')
-            ->selectRaw("strftime('%Y-%m', created_at) as month, type, SUM quantity) as count, SUM quantity * COALESCE(price_per_unit, 0)) as value")
+            ->groupBy(DB::raw("DATE_FORMAT(created_at, '%Y-%m')"), 'type')
+            ->selectRaw("DATE_FORMAT(created_at, '%Y-%m') as month, type, SUM quantity) as count, SUM quantity * COALESCE(price_per_unit, 0)) as value")
             ->orderBy('month')
             ->get()
             ->groupBy('month');
