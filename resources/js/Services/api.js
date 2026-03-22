@@ -11,7 +11,7 @@ const api = axios.create({
 });
 
 // Response interceptor for error handling
-// Guard mot redirect-lÃ¸kke: omdiriger kun Ã©n gang og kun hvis vi ikke allerede er pÃ¥ login-siden
+// Guard mot redirect-løkke: omdiriger kun én gang og kun hvis vi ikke allerede er på login-siden
 let isRedirectingToLogin = false;
 api.interceptors.response.use(
     (response) => response,
