@@ -9,9 +9,18 @@ if [ -z "$APP_KEY" ]; then
     php artisan key:generate --force
 fi
 
-# Run migrations
-echo "🔄 Running migrations..."
-php artisan migrate --force
+# Wait for DB and run migrations
+echo "🔄 Waiting for database and running migrations..."
+RETRIES=20
+until php artisan migrate --force; do
+    RETRIES=$((RETRIES - 1))
+    if [ $RETRIES -le 0 ]; then
+        echo "❌ Database not available after retries. Exiting."
+        exit 1
+    fi
+    echo "⏳ DB not ready yet, retrying in 5s... ($RETRIES retries left)"
+    sleep 5
+done
 
 # Clear and cache config
 echo "🔧 Caching configuration..."
