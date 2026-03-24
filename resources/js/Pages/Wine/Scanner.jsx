@@ -9,73 +9,112 @@ function BarcodeScanner({ onDetected, active }) {
     const canvasRef = useRef(null);
     const streamRef = useRef(null);
     const readerRef = useRef(null);
+    const animFrameRef = useRef(null);
+    const mountedRef = useRef(true);
 
     useEffect(() => {
-        if (!active) {
-            stopCamera();
-            return;
+        mountedRef.current = true;
+        if (active) {
+            startCamera();
         }
-
-        startCamera();
-
-        return () => stopCamera();
+        return () => {
+            mountedRef.current = false;
+            stopCamera();
+        };
     }, [active]);
 
     const startCamera = async () => {
         try {
-            // Kamera-API krever HTTPS
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                toast.error('Kamera krever HTTPS. Bruk manuell inntasting av strekkoden i stedet.', { duration: 8000 });
+                toast.error('Kamera krever HTTPS. Bruk manuell inntasting i stedet.', { duration: 8000 });
                 return;
             }
+
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: {
+                    facingMode: { ideal: 'environment' },
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 },
+                },
+                audio: false,
+            });
+
+            if (!mountedRef.current) {
+                stream.getTracks().forEach(t => t.stop());
+                return;
+            }
+
+            streamRef.current = stream;
+            const video = videoRef.current;
+            if (!video) return;
+
+            video.srcObject = stream;
+            video.setAttribute('playsinline', true);
+            video.setAttribute('muted', true);
+
+            await new Promise((resolve, reject) => {
+                video.onloadedmetadata = resolve;
+                video.onerror = reject;
+                setTimeout(reject, 8000);
+            });
+
+            await video.play();
 
             const { BrowserMultiFormatReader } = await import('@zxing/browser');
             const reader = new BrowserMultiFormatReader();
             readerRef.current = reader;
 
-            const videoElement = videoRef.current;
-            if (!videoElement) return;
+            const canvas = canvasRef.current;
+            const ctx = canvas ? canvas.getContext('2d') : null;
 
-            // Bruk decodeFromConstraints – lar zxing håndtere kamera-stream korrekt
-            const constraints = {
-                video: {
-                    facingMode: { ideal: 'environment' },
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 },
+            const tick = async () => {
+                if (!mountedRef.current || !active) return;
+                if (video.readyState === video.HAVE_ENOUGH_DATA && ctx && canvas) {
+                    canvas.height = video.videoHeight;
+                    canvas.width = video.videoWidth;
+                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    try {
+                        const result = reader.decodeFromCanvas(canvas);
+                        if (result) {
+                            onDetected(result.getText());
+                            return;
+                        }
+                    } catch (_) {}
                 }
+                animFrameRef.current = requestAnimationFrame(tick);
             };
 
-            await reader.decodeFromConstraints(constraints, videoElement, (result, error) => {
-                if (result) {
-                    onDetected(result.getText());
-                }
-            });
-
-            if (videoElement.srcObject) {
-                streamRef.current = videoElement.srcObject;
-            }
+            animFrameRef.current = requestAnimationFrame(tick);
         } catch (err) {
             console.error('Camera error:', err);
+            if (!mountedRef.current) return;
             if (err.name === 'NotAllowedError') {
-                toast.error('Kameratilgang ble nektet. Gi tillatelse i nettleserinnstillingene.');
+                toast.error('Kameratilgang ble nektet. Gi tillatelse i innstillingene.');
             } else if (err.name === 'NotFoundError') {
-                toast.error('Fant ikke kamera. Sjekk at enheten har et kamera.');
-            } else if (!navigator.mediaDevices) {
-                toast.error('Kamera krever HTTPS. Bruk manuell inntasting i stedet.', { duration: 8000 });
+                toast.error('Fant ikke kamera pa enheten.');
+            } else if (err.name === 'OverconstrainedError') {
+                toast.error('Kamerainnstillinger stttes ikke. Provv manuell inntasting.');
             } else {
-                toast.error('Kunne ikke starte kameraet: ' + err.message);
+                toast.error('Kunne ikke starte kameraet: ' + (err.message || err.name));
             }
         }
     };
 
     const stopCamera = () => {
+        if (animFrameRef.current) {
+            cancelAnimationFrame(animFrameRef.current);
+            animFrameRef.current = null;
+        }
         if (readerRef.current) {
-            readerRef.current.reset();
+            try { readerRef.current.reset(); } catch (_) {}
             readerRef.current = null;
         }
         if (streamRef.current) {
             streamRef.current.getTracks().forEach(track => track.stop());
             streamRef.current = null;
+        }
+        if (videoRef.current) {
+            videoRef.current.srcObject = null;
         }
     };
 
@@ -89,15 +128,11 @@ function BarcodeScanner({ onDetected, active }) {
                 className="w-full h-full object-cover"
             />
             <canvas ref={canvasRef} className="hidden" />
-
-            {/* Scanner overlay */}
             <div className="scanner-overlay">
                 <div className="scanner-frame">
                     <div className="scanner-line" />
                 </div>
             </div>
-
-            {/* Status indicator */}
             {active && (
                 <div className="absolute bottom-4 left-0 right-0 flex justify-center">
                     <span className="bg-black/60 text-white text-sm px-4 py-2 rounded-full flex items-center gap-2">
@@ -132,7 +167,7 @@ function ManualInput({ onSubmit }) {
                 inputMode="numeric"
                 pattern="[0-9]*"
             />
-            <button type="submit" className="btn-wine px-4">Søk</button>
+            <button type="submit" className="btn-wine px-4">Sok</button>
         </form>
     );
 }
@@ -174,18 +209,15 @@ function ProductResult({ product, onAdd, onDismiss }) {
                             </svg>
                         </button>
                     </div>
-
                     <div className="flex flex-wrap gap-2 mt-2">
                         {product.type && <span className="text-xs px-2 py-0.5 rounded-full bg-wine-100 text-wine-700">{product.type}</span>}
                         {product.year && <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{product.year}</span>}
                         {product.country && <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{product.country}</span>}
                         {product.grape_variety && <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{product.grape_variety}</span>}
                     </div>
-
                     <p className="text-2xl font-bold text-wine-700 mt-3">
                         {product.price ? `${Number(product.price).toLocaleString('nb-NO')} kr` : 'Ukjent pris'}
                     </p>
-
                     <div className="flex items-center gap-3 mt-4">
                         <select
                             value={quantity}
@@ -217,23 +249,20 @@ export default function WineScanner() {
     const [lastBarcode, setLastBarcode] = useState('');
 
     const handleBarcodeDetected = useCallback(async (barcode) => {
-        // Unngå å søke opp samme strekkode flere ganger
         if (barcode === lastBarcode || lookingUp) return;
         setLastBarcode(barcode);
         setScanning(false);
         setLookingUp(true);
-
-        toast.loading('Søker opp strekkode...', { id: 'barcode-lookup' });
-
+        toast.loading('Soker opp strekkode...', { id: 'barcode-lookup' });
         try {
             const response = await lookupBarcode(barcode);
             setProduct(response.data.data);
             toast.success('Vin funnet!', { id: 'barcode-lookup' });
         } catch (err) {
             if (err.response?.status === 404) {
-                toast.error('Fant ingen vin med denne strekkoden. Prøv manuelt søk.', { id: 'barcode-lookup' });
+                toast.error('Fant ingen vin med denne strekkoden.', { id: 'barcode-lookup' });
             } else {
-                toast.error('Oppslag feilet. Prøv igjen.', { id: 'barcode-lookup' });
+                toast.error('Oppslag feilet. Provv igjen.', { id: 'barcode-lookup' });
             }
         } finally {
             setLookingUp(false);
@@ -259,23 +288,17 @@ export default function WineScanner() {
     return (
         <AuthenticatedLayout>
             <Head title="Strekkodescanner" />
-
             <div className="mb-6">
                 <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Scan strekkode</h1>
-                <p className="text-gray-500 mt-1">Scan vinflasken med kameraet for å legge den i kjelleren</p>
+                <p className="text-gray-500 mt-1">Scan vinflasken med kameraet for a legge den i kjelleren</p>
             </div>
-
             <div className="max-w-lg mx-auto space-y-6">
-                {/* Scanner */}
                 {!product && (
                     <>
                         {scanning ? (
                             <div>
                                 <BarcodeScanner onDetected={handleBarcodeDetected} active={scanning} />
-                                <button
-                                    onClick={() => setScanning(false)}
-                                    className="w-full mt-4 py-3 text-sm text-gray-600 hover:text-gray-800 border border-gray-300 rounded-lg"
-                                >
+                                <button onClick={() => setScanning(false)} className="w-full mt-4 py-3 text-sm text-gray-600 hover:text-gray-800 border border-gray-300 rounded-lg">
                                     Stopp kamera
                                 </button>
                             </div>
@@ -290,49 +313,31 @@ export default function WineScanner() {
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0z" />
                                 </svg>
                                 <span className="text-lg font-medium">Start kamera</span>
-                                <span className="text-sm text-gray-400">Pek kameraet mot strekkoden på flasken</span>
+                                <span className="text-sm text-gray-400">Pek kameraet mot strekkoden pa flasken</span>
                             </button>
                         )}
-
                         <div className="relative">
-                            <div className="absolute inset-0 flex items-center">
-                                <div className="w-full border-t border-gray-200" />
-                            </div>
+                            <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-200" /></div>
                             <div className="relative flex justify-center text-sm">
                                 <span className="bg-gray-50 dark:bg-gray-900 px-3 text-gray-400">eller</span>
                             </div>
                         </div>
-
                         <ManualInput onSubmit={handleBarcodeDetected} />
-
                         <div className="text-center">
-                            <Link href="/search" className="text-sm text-wine-600 hover:text-wine-800">
-                                Søk etter vin manuelt i stedet
-                            </Link>
+                            <Link href="/search" className="text-sm text-wine-600 hover:text-wine-800">Sok etter vin manuelt i stedet</Link>
                         </div>
                     </>
                 )}
-
-                {/* Loading */}
                 {lookingUp && !product && (
                     <div className="flex flex-col items-center py-8">
                         <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-wine-700" />
-                        <p className="text-gray-500 mt-4">Søker i Vinmonopolets database...</p>
+                        <p className="text-gray-500 mt-4">Soker i Vinmonopolets database...</p>
                     </div>
                 )}
-
-                {/* Product result */}
                 {product && (
                     <div className="space-y-4">
-                        <ProductResult
-                            product={product}
-                            onAdd={handleAddToCellar}
-                            onDismiss={() => { setProduct(null); setLastBarcode(''); }}
-                        />
-                        <button
-                            onClick={() => { setProduct(null); setLastBarcode(''); setScanning(true); }}
-                            className="w-full py-3 text-sm text-wine-600 hover:text-wine-800 border border-wine-200 rounded-lg"
-                        >
+                        <ProductResult product={product} onAdd={handleAddToCellar} onDismiss={() => { setProduct(null); setLastBarcode(''); }} />
+                        <button onClick={() => { setProduct(null); setLastBarcode(''); setScanning(true); }} className="w-full py-3 text-sm text-wine-600 hover:text-wine-800 border border-wine-200 rounded-lg">
                             Scan en ny flaske
                         </button>
                     </div>
