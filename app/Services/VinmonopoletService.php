@@ -55,45 +55,45 @@ class VinmonopoletService
     /**
      * Hent produkt via strekkode (EAN/GTIN eller Vinmonopolet produkt-ID)
      *
+     * VIKTIG: Vinmonopolet sitt API støtter kun productId-oppslag.
+     * barcode= og ean= parameterne fungerer ikke for EAN-13 fra produsenter.
+     *
      * Strategi:
-     * 1. 7-sifret strekkode → forsøk direkte Vinmonopolet productId-oppslag
-     * 2. EAN-strekkode → slå opp direkte via Vinmonopolet barcode=-parameter
-     * 3. EAN-13 → prøv å ekstrahere innebygd 7-sifret Vinmonopolet-ID
+     * 1. 7-sifret strekkode → direkte Vinmonopolet productId-oppslag (Vinmonopolet-sticker)
+     * 2. EAN-13 → prøv å finne innebygd 7-sifret Vinmonopolet-ID som substring
      */
     public function getProductByBarcode(string $barcode): ?array
     {
-        // v2 i cache-nøkkelen buster gamle feilaktige resultater (f.eks. "Plastpose")
-        $cacheKey = "vinmonopolet_barcode_v2_{$barcode}";
+        // v3 i cache-nøkkelen buster tidligere feilaktige resultater
+        $cacheKey = "vinmonopolet_barcode_v3_{$barcode}";
 
         return Cache::remember($cacheKey, 3600, function () use ($barcode) {
             try {
-                // Strategi 1: 7-sifret → direkte productId-oppslag
+                // Strategi 1: 7-sifret → direkte productId-oppslag (Vinmonopolets egne stickere)
                 if (preg_match('/^\d{7}$/', $barcode)) {
                     $product = $this->getProductById($barcode);
-                    if ($product && !$this->isMiscProduct($product)) {
+                    if ($product) {
                         return $product;
                     }
                 }
 
-                // Strategi 2: Direkte EAN-oppslag mot Vinmonopolet barcode=-parameter
-                $product = $this->lookupByEanOnVinmonopolet($barcode);
-                if ($product) {
-                    return $product;
-                }
-
-                // Strategi 3: For EAN-13, prøv å trekke ut mulige 7-sifrede Vinmonopolet-IDer
+                // Strategi 2: EAN-13 → prøv substrings som kan inneholde 7-sifret productId
+                // Fungerer for italienske viner (GS1-prefix 80x) der productId starter med 80
                 if (preg_match('/^\d{13}$/', $barcode)) {
-                    $candidates = [
+                    $candidates = array_unique([
                         substr($barcode, 0, 7),
                         substr($barcode, 1, 7),
                         substr($barcode, 2, 7),
+                        substr($barcode, 3, 7),
                         substr($barcode, 6, 7),
-                    ];
-                    foreach (array_unique($candidates) as $candidate) {
+                    ]);
+                    foreach ($candidates as $candidate) {
+                        // Hopp over åpenbare ikke-produkt-IDer (for lave tall)
+                        if ((int) $candidate < 100) continue;
                         $product = $this->getProductById($candidate);
-                        if ($product && !$this->isMiscProduct($product)) {
-                            Log::info('Barcode resolved via EAN-13 substring extraction', [
-                                'barcode' => $barcode,
+                        if ($product && !$this->isNonBeverage($product)) {
+                            Log::info('EAN-13 barcode resolved via substring', [
+                                'ean' => $barcode,
                                 'matched_id' => $candidate,
                                 'name' => $product['name'],
                             ]);
@@ -102,7 +102,7 @@ class VinmonopoletService
                     }
                 }
 
-                Log::info('Barcode not found in Vinmonopolet', ['barcode' => $barcode]);
+                Log::info('Barcode not found', ['barcode' => $barcode]);
                 return null;
             } catch (\Exception $e) {
                 Log::error('Vinmonopolet barcode lookup error', [
@@ -115,51 +115,21 @@ class VinmonopoletService
     }
 
     /**
-     * Direkte EAN-oppslag mot Vinmonopolet API via barcode=-parameteren
+     * Sjekk om produktet er tilbehør/annet og ikke en drikke
      */
-    private function lookupByEanOnVinmonopolet(string $barcode): ?array
+    private function isNonBeverage(array $product): bool
     {
-        try {
-            $response = Http::withHeaders([
-                'Ocp-Apim-Subscription-Key' => $this->apiKey,
-                'Accept' => 'application/json',
-            ])->get("{$this->baseUrl}/products/v0/details-normal", [
-                'maxResults' => 1,
-                'barcode' => $barcode,
-            ]);
-
-            if ($response->successful()) {
-                $products = $this->transformProducts($response->json());
-                $filtered = array_values(array_filter($products, fn ($p) => !$this->isMiscProduct($p)));
-                if (!empty($filtered)) {
-                    Log::info('Barcode resolved via Vinmonopolet barcode param', [
-                        'barcode' => $barcode,
-                        'name' => $filtered[0]['name'],
-                    ]);
-                    return $filtered[0];
-                }
-            }
-
-            return null;
-        } catch (\Exception $e) {
-            Log::warning('Vinmonopolet EAN lookup failed', [
-                'barcode' => $barcode,
-                'message' => $e->getMessage(),
-            ]);
-            return null;
-        }
-    }
-
-    /**
-     * Sjekk om produktet er diverse/tilbehør og ikke en drikke
-     */
-    private function isMiscProduct(array $product): bool
-    {
-        $miscKeywords = ['plastpose', 'pose', 'papirpose', 'bag', 'glass', 'korkskrue', 'tilbehør', 'accessory'];
+        $nonBeverageKeywords = [
+            'plastpose', 'pose', 'papirpose', 'bag',
+            'glass', 'vinglass', 'champagneglass',
+            'kork', 'ølkork', 'korkskrue', 'propptrekker',
+            'tilbehør', 'gaveeske', 'accessory', 'eske',
+            'kjølepose', 'ispose', 'deksel',
+        ];
         $name = mb_strtolower($product['name'] ?? '');
-        foreach ($miscKeywords as $keyword) {
+        foreach ($nonBeverageKeywords as $keyword) {
             if (str_contains($name, $keyword)) {
-                Log::info('Filtered out misc product from barcode result', ['name' => $product['name']]);
+                Log::info('Filtered out non-beverage from barcode result', ['name' => $product['name']]);
                 return true;
             }
         }
