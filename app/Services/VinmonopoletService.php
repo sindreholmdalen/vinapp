@@ -32,7 +32,7 @@ class VinmonopoletService
                     'Accept' => 'application/json',
                 ])->get("{$this->baseUrl}/products/v0/details-normal", [
                     'maxResults' => $limit,
-                    'query' => $query,
+                    'productShortNameContains' => $query,
                 ]);
 
                 if ($response->successful()) {
@@ -53,28 +53,56 @@ class VinmonopoletService
     }
 
     /**
-     * Hent produkt via strekkode (EAN/GTIN)
+     * Hent produkt via strekkode (EAN/GTIN eller Vinmonopolet produkt-ID)
+     *
+     * Strategi:
+     * 1. 7-sifret strekkode → forsøk direkte Vinmonopolet productId-oppslag
+     * 2. EAN-strekkode → slå opp direkte via Vinmonopolet barcode=-parameter
+     * 3. EAN-13 → prøv å ekstrahere innebygd 7-sifret Vinmonopolet-ID
      */
     public function getProductByBarcode(string $barcode): ?array
     {
-        $cacheKey = "vinmonopolet_barcode_{$barcode}";
+        // v2 i cache-nøkkelen buster gamle feilaktige resultater (f.eks. "Plastpose")
+        $cacheKey = "vinmonopolet_barcode_v2_{$barcode}";
 
         return Cache::remember($cacheKey, 3600, function () use ($barcode) {
             try {
-                // Søk via GTIN/barcode
-                $response = Http::withHeaders([
-                    'Ocp-Apim-Subscription-Key' => $this->apiKey,
-                    'Accept' => 'application/json',
-                ])->get("{$this->baseUrl}/products/v0/details-normal", [
-                    'maxResults' => 1,
-                    'query' => $barcode,
-                ]);
-
-                if ($response->successful()) {
-                    $products = $this->transformProducts($response->json());
-                    return !empty($products) ? $products[0] : null;
+                // Strategi 1: 7-sifret → direkte productId-oppslag
+                if (preg_match('/^\d{7}$/', $barcode)) {
+                    $product = $this->getProductById($barcode);
+                    if ($product && !$this->isMiscProduct($product)) {
+                        return $product;
+                    }
                 }
 
+                // Strategi 2: Direkte EAN-oppslag mot Vinmonopolet barcode=-parameter
+                $product = $this->lookupByEanOnVinmonopolet($barcode);
+                if ($product) {
+                    return $product;
+                }
+
+                // Strategi 3: For EAN-13, prøv å trekke ut mulige 7-sifrede Vinmonopolet-IDer
+                if (preg_match('/^\d{13}$/', $barcode)) {
+                    $candidates = [
+                        substr($barcode, 0, 7),
+                        substr($barcode, 1, 7),
+                        substr($barcode, 2, 7),
+                        substr($barcode, 6, 7),
+                    ];
+                    foreach (array_unique($candidates) as $candidate) {
+                        $product = $this->getProductById($candidate);
+                        if ($product && !$this->isMiscProduct($product)) {
+                            Log::info('Barcode resolved via EAN-13 substring extraction', [
+                                'barcode' => $barcode,
+                                'matched_id' => $candidate,
+                                'name' => $product['name'],
+                            ]);
+                            return $product;
+                        }
+                    }
+                }
+
+                Log::info('Barcode not found in Vinmonopolet', ['barcode' => $barcode]);
                 return null;
             } catch (\Exception $e) {
                 Log::error('Vinmonopolet barcode lookup error', [
@@ -84,6 +112,58 @@ class VinmonopoletService
                 return null;
             }
         });
+    }
+
+    /**
+     * Direkte EAN-oppslag mot Vinmonopolet API via barcode=-parameteren
+     */
+    private function lookupByEanOnVinmonopolet(string $barcode): ?array
+    {
+        try {
+            $response = Http::withHeaders([
+                'Ocp-Apim-Subscription-Key' => $this->apiKey,
+                'Accept' => 'application/json',
+            ])->get("{$this->baseUrl}/products/v0/details-normal", [
+                'maxResults' => 1,
+                'barcode' => $barcode,
+            ]);
+
+            if ($response->successful()) {
+                $products = $this->transformProducts($response->json());
+                $filtered = array_values(array_filter($products, fn ($p) => !$this->isMiscProduct($p)));
+                if (!empty($filtered)) {
+                    Log::info('Barcode resolved via Vinmonopolet barcode param', [
+                        'barcode' => $barcode,
+                        'name' => $filtered[0]['name'],
+                    ]);
+                    return $filtered[0];
+                }
+            }
+
+            return null;
+        } catch (\Exception $e) {
+            Log::warning('Vinmonopolet EAN lookup failed', [
+                'barcode' => $barcode,
+                'message' => $e->getMessage(),
+            ]);
+            return null;
+        }
+    }
+
+    /**
+     * Sjekk om produktet er diverse/tilbehør og ikke en drikke
+     */
+    private function isMiscProduct(array $product): bool
+    {
+        $miscKeywords = ['plastpose', 'pose', 'papirpose', 'bag', 'glass', 'korkskrue', 'tilbehør', 'accessory'];
+        $name = mb_strtolower($product['name'] ?? '');
+        foreach ($miscKeywords as $keyword) {
+            if (str_contains($name, $keyword)) {
+                Log::info('Filtered out misc product from barcode result', ['name' => $product['name']]);
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -175,7 +255,10 @@ class VinmonopoletService
                 'price' => isset($item['prices'][0]['salesPrice']) ? (float) $item['prices'][0]['salesPrice'] : null,
                 'volume_ml' => isset($item['basic']['volume']) ? (float) $item['basic']['volume'] : null,
                 'description' => $item['description']['characteristics']['colour'] ?? null,
-                'image_url' => $item['basic']['productImage']['url'] ?? null,
+                'image_url' => $item['basic']['productImage']['url']
+                    ?? (isset($item['basic']['productId'])
+                        ? "https://bilder.vinmonopolet.no/cache/515x515-0/{$item['basic']['productId']}-1.jpg"
+                        : null),
                 'product_url' => "https://www.vinmonopolet.no/p/" . ($item['basic']['productId'] ?? ''),
                 'food_pairings' => $this->extractFoodPairings($item),
                 'sweetness' => $item['description']['characteristics']['sweetness'] ?? null,
